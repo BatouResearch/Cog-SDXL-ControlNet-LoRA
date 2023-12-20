@@ -13,6 +13,7 @@ import cv2
 from cog import BasePredictor, Input, Path
 from PIL import Image
 from diffusers import (
+    UNet2DConditionModel,
     DDIMScheduler,
     DiffusionPipeline,
     DPMSolverMultistepScheduler,
@@ -47,6 +48,7 @@ REFINER_URL = (
     "https://weights.replicate.delivery/default/sdxl/refiner-no-vae-no-encoder-1.0.tar"
 )
 SAFETY_URL = "https://weights.replicate.delivery/default/sdxl/safety-1.0.tar"
+DPO_UNET_CACHE = "./dpo-cache"
 
 
 class KarrasDPM:
@@ -196,7 +198,14 @@ class Predictor(BasePredictor):
             use_safetensors=True,
             variant="fp16",
         )
+        # Loading DPO-SDXL unet
+        unet = UNet2DConditionModel.from_pretrained(
+            DPO_UNET_CACHE,
+            torch_dtype=torch.float16,
+        )
+        self.control_text2img_pipe.unet = unet
         self.control_text2img_pipe.to("cuda")
+        
         self.is_lora = False
         if weights or os.path.exists("./trained-model"):
             self.load_trained_weights(weights, self.control_text2img_pipe)
