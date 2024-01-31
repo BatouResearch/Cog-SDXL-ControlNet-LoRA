@@ -20,8 +20,6 @@ from diffusers import (
     EulerDiscreteScheduler,
     HeunDiscreteScheduler,
     PNDMScheduler,
-    StableDiffusionXLImg2ImgPipeline,
-    StableDiffusionXLInpaintPipeline,
     StableDiffusionXLControlNetPipeline,
     StableDiffusionXLControlNetImg2ImgPipeline,
     ControlNetModel
@@ -197,6 +195,16 @@ class Predictor(BasePredictor):
             variant="fp16",
         )
         self.control_text2img_pipe.to("cuda")
+
+        self.control_img2img_pipe = StableDiffusionXLControlNetImg2ImgPipeline.from_pretrained(
+            SDXL_MODEL_CACHE,
+            controlnet=controlnet,
+            torch_dtype=torch.float16,
+            use_safetensors=True,
+            variant="fp16",
+        )
+        self.control_text2img_pipe.to("cuda")
+
         self.is_lora = False
         if weights or os.path.exists("./trained-model"):
             self.load_trained_weights(weights, self.control_text2img_pipe)
@@ -280,19 +288,32 @@ class Predictor(BasePredictor):
             description="Input prompt",
             default="An astronaut riding a rainbow unicorn",
         ),
-        negative_prompt: str = Input(
-            description="Input Negative Prompt",
-            default="",
-        ),
         image: Path = Input(
             description="Input image for img2img or inpaint mode",
             default=None,
+        ),
+        img2img: bool = Input(
+            description="Use img2img pipeline, it will use the image input both as the control image and the base image.",
+            default=None
         ),
         condition_scale: float = Input(
             description="The bigger this number is, the more ControlNet interferes",
             default=0.5,
             ge=0.0,
+            le=2.0,
+        ),
+        strength: float = Input(
+            description="When img2img is active, the denoising strength. 1 means total destruction of the input image.",
+            default=0.7,
+            ge=0.0,
             le=1.0,
+        ),
+        negative_prompt: str = Input(
+            description="Input Negative Prompt",
+            default="",
+        ),
+        num_inference_steps: int = Input(
+            description="Number of denoising steps", ge=1, le=500, default=30
         ),
         num_outputs: int = Input(
             description="Number of images to output",
@@ -304,9 +325,6 @@ class Predictor(BasePredictor):
             description="scheduler",
             choices=SCHEDULERS.keys(),
             default="K_EULER",
-        ),
-        num_inference_steps: int = Input(
-            description="Number of denoising steps", ge=1, le=500, default=50
         ),
         guidance_scale: float = Input(
             description="Scale for classifier-free guidance", ge=1, le=50, default=7.5
@@ -358,12 +376,24 @@ class Predictor(BasePredictor):
         print(f"Prompt: {prompt}")
         image = self.load_image(image)
         image, width, height = self.resize_image(image)
-        print("txt2img mode")
-        sdxl_kwargs["image"] = self.image2canny(image)
-        sdxl_kwargs["controlnet_conditioning_scale"] = condition_scale
-        sdxl_kwargs["width"] = width
-        sdxl_kwargs["height"] = height
-        pipe = self.control_text2img_pipe
+
+        if (img2img) :
+            print("img2img mode")
+            sdxl_kwargs["image"] = image
+            sdxl_kwargs["control_image"] = self.image2canny(image)
+            sdxl_kwargs["strength"] = strength
+            sdxl_kwargs["controlnet_conditioning_scale"] = condition_scale
+            sdxl_kwargs["width"] = width
+            sdxl_kwargs["height"] = height
+            pipe = self.control_text2img_pipe
+
+        else:
+            print("img2img mode")
+            sdxl_kwargs["image"] = self.image2canny(image)
+            sdxl_kwargs["controlnet_conditioning_scale"] = condition_scale
+            sdxl_kwargs["width"] = width
+            sdxl_kwargs["height"] = height
+            pipe = self.control_text2img_pipe
 
         if refine == "base_image_refiner":
             sdxl_kwargs["output_type"] = "latent"
