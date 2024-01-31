@@ -196,14 +196,17 @@ class Predictor(BasePredictor):
         )
         self.control_text2img_pipe.to("cuda")
 
-        self.control_img2img_pipe = StableDiffusionXLControlNetImg2ImgPipeline.from_pretrained(
-            SDXL_MODEL_CACHE,
+        self.control_img2img_pipe = StableDiffusionXLControlNetImg2ImgPipeline(    
+            vae=self.control_text2img_pipe.vae,
+            text_encoder=self.control_text2img_pipe.text_encoder,
+            text_encoder_2=self.control_text2img_pipe.text_encoder_2,
+            tokenizer=self.control_text2img_pipe.tokenizer,
+            tokenizer_2=self.control_text2img_pipe.tokenizer_2,
+            unet=self.control_text2img_pipe.unet,
+            scheduler=self.control_text2img_pipe.scheduler,
             controlnet=controlnet,
-            torch_dtype=torch.float16,
-            use_safetensors=True,
-            variant="fp16",
         )
-        self.control_text2img_pipe.to("cuda")
+        self.control_img2img_pipe.to("cuda")
 
         self.is_lora = False
         if weights or os.path.exists("./trained-model"):
@@ -298,13 +301,13 @@ class Predictor(BasePredictor):
         ),
         condition_scale: float = Input(
             description="The bigger this number is, the more ControlNet interferes",
-            default=0.5,
+            default=1.1,
             ge=0.0,
             le=2.0,
         ),
         strength: float = Input(
             description="When img2img is active, the denoising strength. 1 means total destruction of the input image.",
-            default=0.7,
+            default=0.8,
             ge=0.0,
             le=1.0,
         ),
@@ -349,7 +352,7 @@ class Predictor(BasePredictor):
             description="LoRA additive scale. Only applicable on trained models.",
             ge=0.0,
             le=1.0,
-            default=0.6,
+            default=0.95,
         ),
         lora_weights: str = Input(
             description="Replicate LoRA weights to use. Leave blank to use the default weights.",
@@ -385,10 +388,10 @@ class Predictor(BasePredictor):
             sdxl_kwargs["controlnet_conditioning_scale"] = condition_scale
             sdxl_kwargs["width"] = width
             sdxl_kwargs["height"] = height
-            pipe = self.control_text2img_pipe
+            pipe = self.control_img2img_pipe
 
         else:
-            print("img2img mode")
+            print("text2img mode")
             sdxl_kwargs["image"] = self.image2canny(image)
             sdxl_kwargs["controlnet_conditioning_scale"] = condition_scale
             sdxl_kwargs["width"] = width
